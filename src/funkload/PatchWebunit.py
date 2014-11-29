@@ -299,6 +299,12 @@ def WF_fetch(self, url, postdata=None, server=None, port=None, protocol=None,
         ok_codes = self.expect_codes
     webproxy = {}
 
+    try:
+        port = int(port)
+    except ValueError:
+        print "Port must be a positive integer [%s], fallback to 80." % port
+        port = 80
+
     if protocol == 'http':
         try:
             proxystring = os.environ["http_proxy"].replace("http://", "")
@@ -308,10 +314,14 @@ def WF_fetch(self, url, postdata=None, server=None, port=None, protocol=None,
             webproxy = False
 
         if webproxy:
-            h = httplib.HTTPConnection(webproxy['host'], webproxy['port'])
+            connection_host = webproxy['host']
+            connection_port = webproxy['port']
         else:
-            h = httplib.HTTP(server, int(port))
-        if int(port) == 80:
+            connection_host = server
+            connection_port = port
+        h = httplib.HTTPConnection(connection_host, connection_port)
+
+        if port == 80:
             host_header = server
         else:
             host_header = '%s:%s' % (server, port)
@@ -329,14 +339,16 @@ def WF_fetch(self, url, postdata=None, server=None, port=None, protocol=None,
 
         # patched to use the given key and cert file
         if webproxy:
-            h = httplib.HTTPSConnection(webproxy['host'], webproxy['port'],
-                                        key_file, cert_file)
+            connection_host = webproxy['host']
+            connection_port = webproxy['port']
         else:
-            h = httplib.HTTPS(server, int(port), key_file, cert_file)
+            connection_host = server
+            connection_port = port
+        h = httplib.HTTPSConnection(connection_host, connection_port, key_file, cert_file)
 
         # FL Patch end  -------------------------
 
-        if int(port) == 443:
+        if port == 443:
             host_header = server
         else:
             host_header = '%s:%s' % (server, port)
@@ -384,10 +396,6 @@ def WF_fetch(self, url, postdata=None, server=None, port=None, protocol=None,
     # Other Full Request headers
     if self.authinfo:
         headers.append(('Authorization', "Basic %s"%self.authinfo))
-    if not webproxy:
-        # HTTPConnection seems to add a host header itself.
-        # So we only need to do this if we are not using a proxy.
-        headers.append(('Host', host_header))
 
     # FL Patch -------------------------
     for key, value in self.extra_headers:
@@ -446,48 +454,18 @@ def WF_fetch(self, url, postdata=None, server=None, port=None, protocol=None,
         h.send(params)
 
     # handle the reply
-    if webproxy:
-        r = h.getresponse()
-        errcode = r.status
-        errmsg = r.reason
-        headers = r.msg
-        if headers is None or headers.has_key('content-length') and headers['content-length'] == "0":
-            data = None
-        else:
-            data = r.read()
-        response = HTTPResponse(self.cookies, protocol, server, port, url,
-                                errcode, errmsg, headers, data,
-                                self.error_content)
-
+    r = h.getresponse()
+    errcode = r.status
+    errmsg = r.reason
+    headers = r.msg
+    if headers is None or headers.has_key('content-length') and headers['content-length'] == "0":
+        data = None
     else:
-        # get the body and save it
-        errcode, errmsg, headers = h.getreply()
-        if headers is None or headers.has_key('content-length') and headers['content-length'] == "0":
-            response = HTTPResponse(self.cookies, protocol, server, port, url,
-                                    errcode, errmsg, headers, None,
-                                    self.error_content)
-        else:
-            f = h.getfile()
-            g = cStringIO.StringIO()
-            if consumer is None:
-                d = f.read()
-            else:
-                d = f.readline(1)
-            while d:
-                g.write(d)
-                if consumer is None:
-                    d = f.read()
-                else:
-                    ret = consumer(d)
-                    if ret == 0:
-                        # consumer close connection
-                        d = None
-                    else:
-                        d = f.readline(1)
-            response = HTTPResponse(self.cookies, protocol, server, port, url,
-                                    errcode, errmsg, headers, g.getvalue(),
-                                    self.error_content)
-            f.close()
+        data = r.read()
+    response = HTTPResponse(self.cookies, protocol, server, port, url,
+                            errcode, errmsg, headers, data,
+                            self.error_content)
+
 
     if errcode not in ok_codes:
         if VERBOSE:
